@@ -1,13 +1,16 @@
 """
 Read mzML files.
 """
-from time import time
+from typing import Tuple
 
+import tqdm
+import numpy as np
 from pyteomics import mzml
-from dataset import DIAScan
 
+from diadem.dataset import DIAScan, DIARun
 
-def test(mzml_file: str):
+def read(mzml_file: str, max_peaks: int = None, min_intensity: float = None)\
+         -> Tuple[np.ndarray, DIAScan]:
     """
     Read an mzML file from a DIA experiment.
 
@@ -21,20 +24,20 @@ def test(mzml_file: str):
     diadem.dataset.DIARun
         A DIARun object containg the raw data.
     """
-    print(mzml_file)
-    with mzml.MzML(mzml_file) as mzml_data:
-        #scans = [s for s in mzml_data.map(DIAScan, 1)]
-        scans = []
-        for f in mzml_data.map():
-            scans.append(f)
-
+    kwargs = {"max_peaks": max_peaks, "min_intensity": min_intensity}
+    with mzml.MzML(mzml_file) as mz_dat:
+        scans = DIARun([s for s in _pbar(mz_dat.map(_mkscan, kwargs=kwargs, processes=4))])
 
     return scans
 
 
-if __name__ == "__main__":
-    start = time()
-    x = test("test.mzML")
-    finish = time()
+def _pbar(x):
+    """Create a tqdm progress bar"""
+    return tqdm.tqdm(x, ascii=True, unit=" scans")
 
-    print(f"{finish-start:.2f}")
+
+def _mkscan(spectrum, max_peaks, min_intensity):
+    """Read a scan"""
+    scan = DIAScan(spectrum)
+    scan.preprocess(min_intensity, max_peaks)
+    return scan
