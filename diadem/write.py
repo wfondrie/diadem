@@ -2,6 +2,7 @@
 Write the masked files to mzML
 """
 import tqdm
+import logging
 import numpy as np
 from psims.mzml import MzMLWriter
 
@@ -53,3 +54,9 @@ def mzML(run, out_file):
                                               scan_start_time=float(scan.ret_time),
                                               precursor_information=pre,
                                               params=params)
+        logging.info("Closing mML...")
+
+    logging.info("Formatting mzML...")
+    writer.format()
+    logging.info("Validating mzML...")
+    #writer.validate()

@@ -6,6 +6,7 @@ experiment. It consists of a collection of DIAWindow() instances which
 store data from the individual DIA MS/MS windows.
 """
 import logging
+import multiprocessing as mp
 from typing import Tuple, Dict
 from itertools import chain
 
@@ -60,7 +61,7 @@ class DIARun():
         """Mask this run using a reference run"""
         logging.info("Masking run by window...")
         num_filtered = []
-        for win_name, win in tqdm.tqdm(self.windows.items(), ascii=True):
+        for win_name, win in tqdm.tqdm(self.windows.items()):
             ref_win = reference_run.windows[win_name]
             before, after = win.mask(ref_win, tol)
             num_filtered.append((win_name, before, after))
@@ -76,11 +77,10 @@ class DIARun():
         logging.info("Total: %i -> %i peaks (%0.2f%% remaining)",
                      total_before, total_after, total_after/total_before*100)
 
-
     def align(self, reference_run, radius=1):
         """Calibrate the retention time to a reference run."""
         logging.info("Aligning runs by window...")
-        for win_name, win in tqdm.tqdm(self.windows.items(), ascii=True):
+        for win_name, win in tqdm.tqdm(self.windows.items()):
             ref_mat = reference_run.windows[win_name].vectorize()
             targ_mat = win.vectorize()
             _, path = fastdtw(ref_mat, targ_mat, radius=radius)
@@ -257,7 +257,7 @@ class DIAScan():
         return self.intensity.sum()
 
     def vectorize(self, bin_width: float = 1.0005,
-                  min_mz: float = 0.4, max_mz: float = 2000) \
+                  min_mz: float = 0.4, max_mz: float = 2000.0) \
         -> np.ndarray:
         """
         Vectorize the mass spectrum
@@ -276,14 +276,9 @@ class DIAScan():
         numpy.ndarray
             A 1D numpy array of the vectorize spectrum.
         """
-        bins = np.arange(min_mz, max_mz, step=bin_width)
-        bin_idx = np.digitize(self.mz, bins)
-        unique_idx = np.unique(bin_idx).tolist()
-        bin_int = [np.max(self.intensity[bin_idx == x]) for x in unique_idx]
-        vec = np.zeros(len(bins)+1)
-        vec[unique_idx] = np.array(bin_int)
-
-        return vec[1:-1] # trim bins outside of (min_mz, max_mz)
+        return _vectorize(self.mz, self.intensity, bin_width,
+                          min_mz, max_mz)
+        
 
     def mask(self, mask_mz, tol=10) -> Tuple[np.ndarray]:
         """
@@ -341,6 +336,11 @@ class DIAScan():
             self.filter(np.argpartition(self.intensity, n)[n:])
 
 # Utility Functions -----------------------------------------------------------
+def _align(ref_mat, targ_mat, radius):
+    """Align a window"""
+    _, path = fastdtw(ref_mat, targ_mat, radius)
+    return _path2map(path, len(target_window.scans))
+
 def _get_index(scan):
     """Return the index of a scan"""
     return scan.index
@@ -372,3 +372,16 @@ def _mask(targ_mz, mask_mz, tol):
             ret_indices.append(idx)
 
     return ret_indices
+
+@nb.njit
+def _vectorize(mz_array, intensity_array, bin_width,
+               min_mz, max_mz):
+    """Quickly vectorize a spectrum"""
+    bins = np.arange(min_mz, max_mz, bin_width)
+    bin_idx = np.digitize(mz_array, bins)
+    unique_idx = np.unique(bin_idx)
+    bin_int = [np.max(intensity_array[bin_idx == x]) for x in unique_idx]
+    vec = np.zeros(len(bins)+1)
+    vec[unique_idx] = np.array(bin_int)
+
+    return vec[1:-1] # trim bins outside of (min_mz, max_mz)
